@@ -1,0 +1,526 @@
+---
+title: "GR5243 PROJ 4"
+output: html_notebook
+---
+
+Hengyang Lin  hl3116
+
+GU4243/GR5243: Applied Data Science
+
+<style type="text/css">
+h1.title {
+  font-size: 24px;
+  color: Black;
+}
+h1 { /* Header 1 */
+  font-size: 24px;
+  color: Black;
+}
+h2 { /* Header 2 */
+  font-size: 20px;
+  color: Blue;
+}
+h3 { /* Header 3 */
+  font-size: 16px;
+  color: Red;
+}
+h4 { /* Header 4 */
+  font-size: 14px;
+  color: Grey;
+}
+</style>
+# step0 : Load libraries {-}
+
+```{r,warnings = FALSE}
+library(stringr)
+library(topicmodels)
+library(tm)
+library(tidytext)
+library(dplyr)
+```
+
+# Step1: Compute Confusion probability matrix
+
+## Preprocess
+
+### 0. Set locations
+```{r}
+file_loc <- "../data/"
+truth_file_loc <- paste0(file_loc, "ground_truth/")
+tesseract_file_loc <- paste0(file_loc, "tesseract/")
+
+doc_name <- list.files(path = truth_file_loc, pattern = "txt")
+truth_doc_loc <- paste0(truth_file_loc, doc_name)
+tesseract_doc_loc <- paste0(tesseract_file_loc, doc_name)
+```
+
+### 1. Make sure that corresponding documents have same number of lines. If not, adjust them manually.
+
+```{r}
+source("../lib/preprocess.R")
+truth_lineNumber_vec <- sapply(truth_doc_loc, get_number_lines)
+tesseract_lineNumber_vec <- sapply(tesseract_doc_loc, get_number_lines)
+
+## Get the names of documents which have different lines in truth and tesseract
+doc_diffLines_names <- doc_name[truth_lineNumber_vec != tesseract_lineNumber_vec]
+
+truth_lineNumber_vec[truth_lineNumber_vec != tesseract_lineNumber_vec]
+tesseract_lineNumber_vec[truth_lineNumber_vec != tesseract_lineNumber_vec]
+```
+There are 0 files with different number of lines.
+
+After manually adjusting, now all the correspoding documents have same number of lines. (There are 13 files needed to be adjusted in total.)
+
+### 2. After breaking every lines down, we need those lines with same number of tokens between ground truth and tesseract.
+
+The reason to do this for estimating confusion matrix, is that if OCR machine reads non-space character to space or vice versa, we are not able to pair tokens one-to-one, which makes the estimation very complicated.
+
+Let's compute the fraction of these lines, because we cannot abandon too many lines.
+```{r}
+## compute the fraction of lines which have the same number of tokens in truth and tesseract
+truth_tokenNum_list <- list()
+for(i in 1:length(doc_name)){
+  doc <- doc_name[i]
+  docloc <- paste0(truth_file_loc, doc)
+  truetext_vec <- readLines(docloc, warn = FALSE, encoding = "UTF-8")
+  truth_tokenNum_list[[i]] <- get_number_tokens(truetext_vec)
+}
+names(truth_tokenNum_list) <- doc_name
+
+tesseract_tokenNum_list <- list()
+for(i in 1:length(doc_name)){
+  doc <- doc_name[i]
+  docloc <- paste0(tesseract_file_loc, doc)
+  tesstext_vec <- readLines(docloc, warn = FALSE, encoding = "UTF-8")
+  tesseract_tokenNum_list[[i]] <- get_number_tokens(tesstext_vec)
+}
+names(tesseract_tokenNum_list) <- doc_name
+
+sum_line <- sum(sapply(truth_tokenNum_list, length)) ## total number of lines
+
+sum_sametokenline <- 0
+for(i in 1:100){
+  sum_sametokenline <- sum_sametokenline + sum(truth_tokenNum_list[[i]] == tesseract_tokenNum_list[[i]])
+}
+
+sum_sametokenline/sum_line
+```
+
+About 88.7% of lines have same numbers of tokens, which are going to be used. It's acceptable.
+
+### 3. Write those 88.7% lines with same number of tokens in two output files.
+
+```{r,eval=FALSE}
+## Get the logic which have the same number of tokens in truth and tesseract
+log_tokNumEq_list <- list()
+for(i in 1:length(doc_name)){
+  log_tokNumEq_list[[i]] <- truth_tokenNum_list[[i]] == tesseract_tokenNum_list[[i]]
+}
+names(log_tokNumEq_list) <- doc_name
+
+## Write those 88.7% lines with same number of tokens in output files.
+output_loc <- "../output/"
+for(i in 1:length(doc_name)){
+  doc <- paste0(truth_file_loc, doc_name[i])
+  text_vec_all <- readLines(doc, warn = FALSE, encoding = "UTF-8")
+  ind_sameTKnum <- log_tokNumEq_list[[i]]
+  text_vec <- text_vec_all[ind_sameTKnum]
+  writeLines(text_vec, paste0(output_loc,"ground_truth/",doc_name[i]), useBytes = TRUE)
+}
+
+for(i in 1:length(doc_name)){
+  doc <- paste0(tesseract_file_loc, doc_name[i])
+  text_vec_all <- readLines(doc, warn = FALSE, encoding = "UTF-8")
+  ind_sameTKnum <- log_tokNumEq_list[[i]]
+  text_vec <- text_vec_all[ind_sameTKnum]
+  writeLines(text_vec, paste0(output_loc,"tesseract/",doc_name[i]), useBytes = TRUE)
+}
+```
+
+### 4. Write those corresponding tokens with same number of characters down in two output files.
+
+After tokens were paired, we have to abandon those corresponding tokens with different length. The reason to this is we didn't consider reading non-space letter to space or vice-versa in our confusion matrix. (The calculation of estimating error about space-converting is very complicated.)
+
+**We need these non-space to non-space converting characters to estimate our confusion probability.**
+```{r,eval=FALSE}
+## Write those tokens with same length down in output files.
+truthline_loc <- paste0(output_loc, "ground_truth/")
+tessline_loc <- paste0(output_loc, "tesseract/")
+
+for(i in 1:length(doc_name)){
+  truth_text <- readLines(paste0(truthline_loc, doc_name[i]), warn = FALSE, encoding = "UTF-8")
+  tess_text <- readLines(paste0(tessline_loc, doc_name[i]), warn = FALSE, encoding = "UTF-8")
+  truth_strsplit_list <- strsplit(truth_text, " ")
+  tess_strsplit_list <- strsplit(tess_text, " ")
+  truth_letternum_list <- lapply(truth_strsplit_list, nchar)
+  tess_letternum_list <- lapply(tess_strsplit_list, nchar)
+  
+  truetk_text <- c()
+  tesstk_text <- c()
+  for(j in 1:length(truth_letternum_list)){
+    ind_letternumEq <- truth_letternum_list[[j]] == tess_letternum_list[[j]]
+    truetk_text <- c(truetk_text, paste0(truth_strsplit_list[[j]][ind_letternumEq], collapse = ""))
+    tesstk_text <- c(tesstk_text, paste0(tess_strsplit_list[[j]][ind_letternumEq], collapse = ""))
+  }
+  writeLines(truetk_text, paste0(output_loc,"ground_truth_tk/",doc_name[i]), useBytes = TRUE)
+  writeLines(tesstk_text, paste0(output_loc,"tesseract_tk/",doc_name[i]), useBytes = TRUE)
+}
+```
+
+## Computating and Saving confusion matrix
+```{r,eval=FALSE}
+source("../lib/confusion_prob_matrix.R")
+```
+### 1. We care about A-Z, a-z, 0-9, and some common punctuations in our letterlist.
+```{r,eval=FALSE}
+lowerletters <- c("a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z")
+upperletters <- toupper(lowerletters)
+numberletters <- c("0","1","2","3","4","5","6","7","8","9")
+punctuation <- c("-", ":", "\\*", "\\(", "\\)", "'", ",", "\\$")
+letterlist <- c(lowerletters, upperletters, numberletters, punctuation)
+d <- length(letterlist)
+```
+### 2. compute and save confusion number matrix. Rownames are printed letters, colnames are true letters.
+```{r,eval=FALSE}
+ground_true_loc <- "../output/ground_truth_tk/"
+tesseract_loc <- "../output/tesseract_tk/"
+```
+```{r,eval=FALSE}
+source("../lib/confusion_prob_matrix.R")
+confusion_num_mat <- confusion_num_matrix(ground_true_loc,tesseract_loc)
+rownames(confusion_num_mat) <- letterlist
+colnames(confusion_num_mat) <- letterlist
+save(confusion_num_mat, file = "../output/confusion_number_matrix.Rdata")
+```
+### 3. compute and save the numbers of true letters in letterlist.
+```{r,eval=FALSE}
+trueletter_num_vec <- rep(0, d)
+for(k in 1:d){
+  trueletter_num_vec[k] <- compute_num_trueletter(letterlist[k], ground_true_loc)
+}
+names(trueletter_num_vec) <- letterlist
+save(trueletter_num_vec, file = "../output/trueletter_num_vec.Rdata")
+```
+### 4. see how many letters we are going to use to estimate the confusion probability.
+
+We compute the ratio of letters used in estimation over total true letters in our selected tokens. As a result, we can see almost all alphabets are used. However, some punctuations are not fully used.
+```{r}
+load("../output/confusion_number_matrix.Rdata")
+load("../output/trueletter_num_vec.Rdata")
+apply(confusion_num_mat, 2, sum)/trueletter_num_vec
+```
+
+### 5. correction: Add 0.5 at zero entries of the confusion number matrix as correction.
+```{r,eval=FALSE}
+confusion_numcor_mat <- confusion_num_mat
+for(i in 1:d){
+  for(j in 1:d){
+    if(confusion_num_mat[i,j] == 0){
+      confusion_numcor_mat[i,j] <- 0.5
+    }
+  }
+}
+```
+
+### 6. Use corrected confusion number matrix and numbers of true letters to compute confusion probability matrix and save it.
+```{r,eval=FALSE}
+confusion_prob_mat <- confusion_numcor_mat
+for(i in 1:d){
+  for(j in 1:d){
+    confusion_prob_mat[i,j] <- confusion_numcor_mat[i,j]/trueletter_num_vec[j]
+  }
+}
+save(confusion_prob_mat, file = "../output/confusion_probability_matrix.Rdata")
+```
+
+# Step2: Detect Typo word
+
+we use a rule-based detection. The ouput is a list with 100 elements which are vectors.
+
+Each element represents a document, while the values of the vector are TRUE or FALSE (Garbage -> True; Not Garbage -> False), and the names of the vector are  tokens of the document.
+
+```{r,eval=FALSE}
+source("../lib/detection.R")
+
+detection_list <- list()
+for(i in 1:length(doc_name)){
+  ocr_fileloc <- paste0(tesseract_file_loc, doc_name[i])
+  detection_list[[i]] <- detect_file(ocr_fileloc)
+}
+names(detection_list) <- doc_name
+save(detection_list, file = "../output/detection_list.Rdata")
+```
+
+Let's have a view at the second element of our ouput, which is the detection result of file "group1_00000010.txt"
+
+(TRUE indicates that the word is garbage; FALSE indicates that the word is clean.)
+```{r}
+load("../output/detection_list.Rdata")
+head(detection_list$group1_00000010.txt, 50)
+```
+
+# Step3: Correction Process
+
+## Preparation
+
+### 0. Get and save a dictionary for us to generate correct candidate. Here we use ground truth files as a dictionary.
+```{r,eval=FALSE}
+source("../lib/lexicon.R")
+dictionary_loc <- truth_file_loc
+#lexicon <- get_dictionary(dictionary_loc)
+lexicon <- get_trueitems(dictionary_loc)
+save(lexicon, file = "../output/lexicon.Rdata")
+```
+
+### 1. Get and save a model list consists of 100 LDA models. Set number of topics to 5.
+
+Each LDA model is trained by ground truth documents other than a specific document doc_i. Then this model is used to compute scores when we are correcting the corresponding tesseract of the specific document doc_i.
+```{r,eval=FALSE}
+n_topics <- 5
+source("../lib/LDAlist.R")
+lda_list <- get_ldamodels(truth_file_loc, n_topics)
+save(lda_list, file = "../output/lda_list.Rdata")
+```
+
+### 2. Load confusion probability matrix, detection result list lexicon and LDA model list as well as letterlist.
+
+```{r}
+load("../output/confusion_probability_matrix.Rdata")
+load("../output/detection_list.Rdata")
+load("../output/lexicon.Rdata")
+load("../output/lda_list.Rdata")
+```
+```{r}
+lowerletters <- c("a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z")
+upperletters <- toupper(lowerletters)
+numberletters <- c("0","1","2","3","4","5","6","7","8","9")
+punctuation <- c("-", ":", "\\*", "\\(", "\\)", "'", ",", "\\$")
+letterlist <- c(lowerletters, upperletters, numberletters, punctuation)
+d <- length(letterlist)
+```
+## Correction
+
+```{r}
+source("../lib/lowercandidate_generate.R")
+source("../lib/correction.R")
+```
+
+### 1. First, let's see how good it is when the function corrects a single typo word.
+
+**Try to correct typoword "posltlon" in file "group1_00000005.txt".**
+
+Candidates are:
+```{r}
+lowercandidate_generate("posltlon", lexicon)
+```
+Correction is:
+```{r}
+correct_word("posltlon", "group1_00000005.txt")
+```
+
+**This function is able to correct upper letter. Try to correct typoword "Wllllam" in file "group1_00000005.txt".**
+
+Candidates are: (here candidates are all lowercase letters because we need lowercase words to compute topicmodel score.)
+```{r}
+lowercandidate_generate("Wllllam", lexicon)
+```
+Correction is: (here correction contains an uppercase letter W)
+```{r}
+correct_word("Wllllam", "group1_00000005.txt")
+```
+
+**Try to correct typoword "prohlblt:", which contains a punctuation, in file "group1_00000005.txt". The true token is "prohibit:".**
+
+Candidates are: (here candidates are with right punctuation. The punctuations would be removed during computing topicmodel score.)
+```{r}
+lowercandidate_generate("prohlblt:", lexicon)
+```
+
+Correction is: (here correction contains right punctuation ":")
+```{r}
+correct_word("prohlblt:", "group1_00000005.txt")
+```
+
+### 2. Seconed, let's try to correct a single tesseract file. We try to correct file "group1_00000010.txt" since it's the shortest to be presented here.
+
+**Correct text "group1_00000010.txt" and save the processed text.**
+```{r,eval=FALSE}
+# correct tesseract file : "group1_00000010.txt"
+doc2 <- "group1_00000010.txt"
+correction_2 <- correct_file(doc2, detection_list)
+writeLines(correction_2, paste0(file_loc,"prediction/",doc2), useBytes = TRUE)
+```
+
+**Show processed text:**
+```{r}
+doc2 <- "group1_00000010.txt"
+text <- readLines(paste0(file_loc,"prediction/",doc2), warn = FALSE, encoding = "UTF-8")
+cat(text)
+```
+**Show tesseract text:**
+```{r}
+text <- readLines(paste0(file_loc,"tesseract/",doc2), warn = FALSE, encoding = "UTF-8")
+cat(text)
+```
+**Show ground truth text:**
+```{r}
+text <- readLines(paste0(file_loc,"ground_truth/",doc2), warn = FALSE, encoding = "UTF-8")
+cat(text)
+```
+
+As we can see in the above, the first correction happened at second line ,where "1nterested" and "companles" were corrected as "interested" and "companies". 
+
+We can also find out that this method helps nothing at many typo words, since it could not correct tokens when number of characters changes nor three or more letters change.
+
+# Step4: Evaluate
+
+To save time, we use first 10 files to measure our correction performance.
+
+## word-wise evaluation
+
+Since our algorithm takes upper case or lower case into consideration, and is able to correct them, we didn't convert text to lower case when we calculating recall or precision.
+
+So our recall and precision are more "strict" than those in starter codes.
+
+### 1. Process first 10 files. Write down the prediction text in "../data/prediction" file.
+
+```{r, eval=FALSE}
+load("../output/detection_list.Rdata")
+prediction_loc <- "../data/prediction/"
+
+docname_toeval <- doc_name[1:10]
+for(i in 1:length(docname_toeval)){
+  processed_text <- correct_file(docname_toeval[i], detection_list)
+  writeLines(processed_text, paste0(prediction_loc, docname_toeval[i]), useBytes = TRUE)
+}
+```
+
+### 2. Visualization
+```{r}
+source("../lib/evaluation.R")
+word_ground_truth_loc <- "../data/ground_truth/"
+word_prediction_loc <- "../data/prediction/"
+word_tesseract_loc <- "../data/tesseract/"
+
+word_performance_table <- data.frame("Before_Processing" = rep(NA,2), 
+                                     "After_Processing" = rep(NA,2))
+row.names(word_performance_table) <- c("word_wise_recall", "word_wise_precision")
+
+word_performance_table["word_wise_recall", "Before_Processing"] <- recall_words(word_ground_truth_loc, word_tesseract_loc)
+word_performance_table["word_wise_recall", "After_Processing"] <- recall_words(word_ground_truth_loc, word_prediction_loc)
+word_performance_table["word_wise_precision", "Before_Processing"] <- 
+  precision_words(word_ground_truth_loc, word_tesseract_loc, word_tesseract_loc)
+word_performance_table["word_wise_precision", "After_Processing"] <- 
+  precision_words(word_ground_truth_loc, word_prediction_loc, word_tesseract_loc)
+
+knitr::kable(word_performance_table, caption="OCR performance: word-wise evaluation")
+```
+
+## Character-wise evaluation
+
+Our correction function cannot help if OCR machine "breaks" one token as two or "combines" two tokens as one during reading. Though word-wise evaluation could still be easily implemented, **character-wise evaluation is very complicated if breaking or combining happens.** Under this situation, we need to use lines with same number of tokens as tesseract data to evaluate our correction character-wisely.
+
+Lines with same number of tokens have been written down at "../output/tesseract" file in Step1 -- preprocess.
+
+### 0. Run our detection algorithm on tesseract files at output file. Save the result of detection.
+
+```{r,eval=FALSE}
+tesseract_loc_eval <- "../output/tesseract/"
+
+source("../lib/detection.R")
+
+detection_list_eval <- list()
+for(i in 1:length(doc_name)){
+  ocr_fileloc_eval <- paste0(tesseract_loc_eval, doc_name[i])
+  detection_list_eval[[i]] <- detect_file(ocr_fileloc_eval)
+}
+names(detection_list_eval) <- doc_name
+save(detection_list_eval, file = "../output/detection_list_eval.Rdata")
+```
+
+### 1. Run correction algorithm on first 10 tesseract files of output file. Write down the corrected text in prediction doc of output.
+```{r,eval=FALSE}
+prediction_loc_eval <- "../output/prediction/"
+load("../output/detection_list_eval.Rdata")
+
+docname_toeval <- doc_name[1:10]
+for(i in 1:length(docname_toeval)){
+  processed_text <- correct_file(docname_toeval[i], detection_list_eval)
+  writeLines(processed_text, paste0(prediction_loc_eval, docname_toeval[i]), useBytes = TRUE)
+}
+```
+
+### 2. Visualization
+```{r}
+source("../lib/evaluation.R")
+
+char_ground_truth_loc <- "../output/ground_truth/"
+char_prediction_loc <- "../output/prediction/"
+char_tesseract_loc <- "../output/tesseract/"
+
+char_performance_table <- data.frame("Before_Processing" = rep(NA,2), 
+                                     "After_Processing" = rep(NA,2))
+row.names(char_performance_table) <- c("character_wise_recall", "character_wise_precision")
+
+char_performance_table["character_wise_recall", "Before_Processing"] <- recall_chars(char_ground_truth_loc, char_tesseract_loc)
+char_performance_table["character_wise_recall", "After_Processing"] <- recall_chars(char_ground_truth_loc, char_prediction_loc)
+char_performance_table["character_wise_precision", "Before_Processing"] <- 
+  precision_chars(char_ground_truth_loc, char_tesseract_loc, char_tesseract_loc)
+char_performance_table["character_wise_precision", "After_Processing"] <- 
+  precision_chars(char_ground_truth_loc, char_prediction_loc, char_tesseract_loc)
+
+knitr::kable(char_performance_table, caption="OCR performance: character-wise evaluation")
+```
+
+Remember that we omitted those lines in which OCR machine breaking or combining tokens during reading happened, in another word we didn't consider the error that OCR machine reads a non-space character to space or vice-versa. **So here character-wise precision and recall are both overestimated.**
+
+# Step5: Use iteration to improve {-}
+
+As stated in the paper, we could use iteration to improve prediction. If a file was processed, then the processed file contains more correct words, which help to improve the topic model part, which means we could perform a new round of detection and correction on the processed file.
+
+**This could be easily implemented in our project if we just regard file prediction as file tesseract.**
+
+To save time, we perform both word-wise and character-wise evaluation on data of lines with same number of tokens, which are contained in outpu file. **Under this situation, the word-wise recall would be equal to word-wise precision.**
+
+We would not run this part because it takes too much time. Besides, according to experiments on several files, iteration here helps quite little.
+```{r, eval=FALSE}
+load("../output/confusion_probability_matrix.Rdata")
+load("../output/lexicon.Rdata")
+
+extra <- 1 #One extra iterations
+pred_file_loc <- "../output/prediction/"
+
+pred_file_name <- list.files(pred_file_loc)
+
+performance_mat <- matrix(NA, nrow = 4, ncol = 2 + extra)
+col_names <- paste0("After_",0:(extra+1),"_times_processing")
+
+performance_table <- data.frame(performance_mat)
+colnames(performance_table) <- col_names
+row.names(performance_table) <- c("word_wise_recall", "word_wise_precision",
+                                  "character_wise_recall", "character_wise_precision")
+
+performance_table[1:2, 1:2] <- word_performance_table
+performance_table[3:4, 1:2] <- char_performance_table
+
+for(I in 1:extra){
+  #detection
+  cur_detection_list <- list()
+  for(i in 1:length(pred_file_name)){
+    ocr_fileloc <- paste0(pred_file_loc, pred_file_name[i])
+    cur_detection_list[[i]] <- detect_file(ocr_fileloc)
+  }
+  names(cur_detection_list) <- pred_file_name
+  #correction
+  for(i in 1:length(pred_file_name)){
+    processed_text <- correct_file(pred_file_name[i], cur_detection_list)
+    writeLines(processed_text, paste0(pred_file_loc, pred_file_name[i]), useBytes = TRUE)
+  }
+  #evaluation
+  performance_table["word_wise_recall",I + 2] <- recall_words("../output/ground_truth/", pred_file_loc)
+  performance_table["word_wise_precision",I + 2] <- precision_words("../output/ground_truth/", pred_file_loc, "../output/tesseract/")
+  performance_table["character_wise_recall", I + 2] <- recall_chars("../output/ground_truth/", pred_file_loc)
+  performance_table["character_wise_precision", I + 2] <- precision_chars("../output/ground_truth/", pred_file_loc, "../output/tesseract/")
+}
+knitr::kable(performance_table, caption="Evaluation in interations")
+```
