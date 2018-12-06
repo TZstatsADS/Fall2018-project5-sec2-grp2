@@ -3,7 +3,7 @@
 Term: Fall 2018
 
 + Team #2
-+ Projec title: Acquire Valued Shopper
++ Projec title: Acquire Valued Shoppers
 + Team members
 	+ Rui Zhang rz2394@columbia.edu
 	+ Shaolong Lin sl4095@columbia.edu
