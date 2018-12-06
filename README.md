@@ -12,7 +12,11 @@ Term: Fall 2018
 + Project summary: In this project, we choose to do the Acquire Valued Shoppers Challenge on Kaggle. Consumer brands often offer discounts to attract new shoppers to buy their products. The most valuable customers are those who return after this initial incented purchase. The goal of this project is to forecast those customers who will become loyal to the product based on the processed data of offering incentives (a.k.a. coupons) to a large number of customers. The workflow of this project includes data preprocessing, data manipulation, feature engineering, exploratory data analysis and model building. We create various predictive models including logistic regression, decision tree, random forests and xgboost. We also obtain the feature importance and performance measurement after obtaining the model results.
 
 	
-**Contribution statement**: ([default](doc/a_note_on_contributions.md)) All team members contributed equally in all stages of this project. All team members approve our work presented in this GitHub repository including this contributions statement. 
+**Contribution statement**: All team members contributed equally in all stages of this project. All team members approve our work presented in this GitHub repository including this contributions statement. 
+Rui Zhang:
+Shaolong Lin:
+Kehui Zhu:
+Rui Zhang:
 
 Following [suggestions](http://nicercode.github.io/blog/2013-04-05-projects/) by [RICH FITZJOHN](http://nicercode.github.io/about/#Team) (@richfitz). This folder is orgarnized as follows.
 
