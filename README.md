@@ -13,9 +13,13 @@ Term: Fall 2018
 
 	
 **Contribution statement**: All team members contributed equally in all stages of this project. All team members approve our work presented in this GitHub repository including this contributions statement
+
 Rui Zhang(rz2394): exploratory data analysis, data manipulation and feature selection discussion & trial, model selection.
+
 Shaolong Lin (sl4095): exploratory data analysis, data preprocessing & cleaning along with some debugging
+
 Kehui Zhu (kz2293): exploratory data analysis, data manipulation and feature selection & trial, model selection
+
 Rui Zhang (rz2406): exploratory data analysis, feature selection & engineering, the hardest part & most devoted contributor
 
 Following [suggestions](http://nicercode.github.io/blog/2013-04-05-projects/) by [RICH FITZJOHN](http://nicercode.github.io/about/#Team) (@richfitz). This folder is orgarnized as follows.
