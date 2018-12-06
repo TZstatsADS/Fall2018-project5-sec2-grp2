@@ -18,7 +18,7 @@ Rui Zhang(rz2394): exploratory data analysis, data manipulation and feature sele
 
 Shaolong Lin (sl4095): exploratory data analysis, data preprocessing & cleaning along with some debugging
 
-Kehui Zhu (kz2293): exploratory data analysis, data manipulation and feature selection & trial, model selection
+Kehui Zhu (kz2293): exploratory data analysis, data manipulation and feature selection & trial, model selection, GitHub repository organization 
 
 Rui Zhang (rz2406): exploratory data analysis, feature selection & engineering, the hardest part & most devoted contributor
 
